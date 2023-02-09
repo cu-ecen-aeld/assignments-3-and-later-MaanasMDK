@@ -17,6 +17,7 @@ void* threadfunc(void* thread_param)
     // TODO: wait, obtain mutex, wait, release mutex as described by thread_data structure
     // hint: use a cast like the one below to obtain thread arguments from your parameter
     //struct thread_data* thread_func_args = (struct thread_data *) thread_param;
+    int err_status = 0;
     struct thread_data *thread_func_args = (struct thread_data *) thread_param;
 
     // wait before obtaining mutex
@@ -24,43 +25,63 @@ void* threadfunc(void* thread_param)
     if( ret == -1 )
     {
         ERROR_LOG("Error usleep at obtain failed with error number %d", errno);
-        thread_func_args->thread_complete_success = false;
-        return thread_param;
+        err_status = 1;
     }
-    DEBUG_LOG("Obtain mutex sleep success!!");
+    else
+    {
+        DEBUG_LOG("Obtain mutex sleep success!!");
+    }
+
 
     // acquire mutex
     ret = pthread_mutex_lock(thread_func_args->mtx);
     if( ret == -1 )
     {
         ERROR_LOG("Error mutex lock failed with error number %d", errno);
-        thread_func_args->thread_complete_success = false;
-        return thread_param;
+        err_status = 1;
     }
-    DEBUG_LOG("Obtain mutex success!!");
+    else
+    {
+        DEBUG_LOG("Obtain mutex success!!");
+    }
+
 
     // wait before release of mutex
     ret = usleep(thread_func_args->wait_to_release_ms * MILLI_TO_MICRO_SCALE);
     if( ret == -1 )
     {
         ERROR_LOG("Error usleep at release failed with error number %d", errno);
-        thread_func_args->thread_complete_success = false;
-        return thread_param;
+        err_status = 1;
     }
-    DEBUG_LOG("Release mutex sleep success!!");
+    else
+    {
+        DEBUG_LOG("Release mutex sleep success!!");
+    }
+
 
     // release mutex
     ret = pthread_mutex_unlock(thread_func_args->mtx);
     if( ret == -1 )
     {
         ERROR_LOG("Error mutex lock failed with error number %d", errno);
-        thread_func_args->thread_complete_success = false;
-        return thread_param;
+        err_status = 1;
     }
-    DEBUG_LOG("Release mutex  success!!");
+    else
+    {
+        DEBUG_LOG("Release mutex  success!!");
+    }
 
-    thread_func_args->thread_complete_success = true;
-    DEBUG_LOG("Thread function success!!");
+    // check if error occurred
+    if( err_status == 0 )
+    {
+        thread_func_args->thread_complete_success = true;
+        DEBUG_LOG("Thread function success!!");
+    }
+    else
+    {
+        thread_func_args->thread_complete_success = false;
+        DEBUG_LOG("Thread function failure!!");      
+    }
     return thread_param;
 }
 
@@ -100,6 +121,8 @@ bool start_thread_obtaining_mutex(pthread_t *thread, pthread_mutex_t *mutex,int 
         return true;
     }
     ERROR_LOG("Error in pthread_create with error number : %d", errno);
+    // cleanup of memory incase of pthread_create error
+    free(thread_parameters);
     return false;
 }
 
