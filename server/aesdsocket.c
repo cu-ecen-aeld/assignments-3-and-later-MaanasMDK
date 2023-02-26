@@ -30,12 +30,16 @@ int sockfd;
 int new_fd;
 int tmp_fd;
 
-
 // Handler for SIGINT and SIGTERM
 void signal_handler(int signum)
 {
-    if (signum == SIGINT || signum == SIGTERM) {
-        syslog(LOG_DEBUG, "Caught signal, exiting!!");
+    if (signum == SIGINT) 
+    {
+        syslog(LOG_DEBUG, "Caught signal SIGINT, exiting!!");
+    }
+    else if( signum == SIGTERM)
+    {
+        syslog(LOG_DEBUG, "Caught signal SIGTERM, exiting!!");
     }
 
     int ret = close(sockfd);
@@ -247,6 +251,8 @@ int main(int argc, char *argv[])
         if( new_fd == -1 )
         {
             syslog(LOG_ERR, "Error : accept with error no : %d", errno);
+            // accept new connection
+            continue;
         }
 
         // Reference : https://man7.org/linux/man-pages/man3/inet_ntop.3.html
@@ -296,6 +302,7 @@ int main(int argc, char *argv[])
                 if(ptr == NULL)
                 {
                     syslog(LOG_ERR, "realloc");
+                    
                 }
                 else
                 {
@@ -330,13 +337,16 @@ int main(int argc, char *argv[])
         // Reading into read_buffer
         read_bytes = read(tmp_fd, read_buffer, file_size);
         if (read_bytes == -1)
-            perror("read");
+        {
+            syslog(LOG_ERR, "read");
+        }
 
         // bytes_sent is return value from send function
         int bytes_sent = send(new_fd, read_buffer, file_size, 0);
 
-        if (bytes_sent == -1) {
-            printf("Error in sending to socket!\n");
+        if (bytes_sent == -1) 
+        {
+            syslog(LOG_ERR, "send");
         }
 
         free(read_buffer);

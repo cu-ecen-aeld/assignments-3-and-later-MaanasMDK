@@ -1,3 +1,4 @@
+# Makefile for Assignment 5
 CC = gcc
 CROSS_COMPILE =
 CFLAGS := -g -Wall -Werror
