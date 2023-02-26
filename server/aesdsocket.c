@@ -172,6 +172,13 @@ int main(int argc, char *argv[])
         syslog(LOG_DEBUG, "socket");
     }
     
+    // to eliminate binding issue
+    const int enable = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0)
+    {
+    	printf("Error : setsockopt\n");
+    }
+    
 
     ret = bind(sockfd, server_info->ai_addr, server_info->ai_addrlen);
     if( ret != 0 )
