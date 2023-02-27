@@ -105,6 +105,7 @@ int deamonize()
     open("/dev/null", O_RDWR);
     dup(0);
     dup(0);
+    syslog(LOG_DEBUG, "daemon");
 
     return 0;
 }
@@ -207,6 +208,10 @@ int main(int argc, char *argv[])
         {
             syslog(LOG_ERR, "Failed to create deamon");
         }
+    }
+    else
+    {
+        syslog(LOG_DEBUG, "NO daemon");
     }
 
     ret = listen(sockfd, BACKLOG);
