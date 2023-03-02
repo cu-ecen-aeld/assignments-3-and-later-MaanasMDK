@@ -1,7 +1,7 @@
 # Makefile for Assignment 5
 CC = gcc
 CROSS_COMPILE =
-CFLAGS := -g -Wall -Werror
+CFLAGS := -g -Wall -Werror -pthread
 LDFLAGS := -pthread
 SRC := aesdsocket.c
 TARGET = aesdsocket
