@@ -20,21 +20,39 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <pthread.h>
+#include <time.h>
 
+/************************************
+* Defines
+*************************************/
 #define RET_ERROR (-1)
+#define RET_SUCCESS (0)
 #define SERVER_PORT ("9000")
 #define BACKLOG (10)
 #define BUFFER_SIZE (3)
 
+/************************************
+* Global Variables
+************************************/
+// socket file descriptor
 int sockfd;
+// temperory file desciptor for the output file
 int tmp_fd;
+// varibale to track file size
 int file_size;
 // mutex to for writing to the common file
 pthread_mutex_t mtx;
 // execution status tracking
 int execution_status = 0;
+// flag to track timeout
+bool timeout = false;
+// timer object
+timer_t timer;
 
-// create a structure for storing thread data
+/**********************************
+* Linked list data structures
+**********************************/
+// structure for storing thread data
 typedef struct 
 {
     pthread_t tid;
@@ -43,14 +61,20 @@ typedef struct
     struct sockaddr_storage t_addr;
 } tdata_t;
 
-// create a structure for a node of the linked list
+// structure for a node of the linked list
 typedef struct node
 {
     tdata_t data;
     struct node *next;
 } node_t;
 
-
+/**********************************
+* Function Definitions
+**********************************/
+// function to print timestamp
+void log_timestamp();
+// function to create timer
+int create_timer();
 // function to insert an element into head of the singly linked list
 int sll_insert( node_t **head, node_t *new_node)
 {
@@ -61,10 +85,10 @@ int sll_insert( node_t **head, node_t *new_node)
     }
     new_node->next = *head;
     *head =  new_node;
-    return 0;
+    return RET_SUCCESS;
 }
 
-// Handler for SIGINT and SIGTERM
+// Handler for SIGINT, SIGTERM, and SIGALRM
 void signal_handler(int signum)
 {
     if (signum == SIGINT) 
@@ -77,8 +101,15 @@ void signal_handler(int signum)
         syslog(LOG_DEBUG, "Caught signal SIGTERM, exiting!!");
         execution_status = 1;
     }
+    else if(signum == SIGALRM)
+    {
+        syslog(LOG_DEBUG, "Caught signal SIGALRM!!");
+        // set timeout flag
+        timeout = true;
+    }
 }
 
+// Cleanup function
 void cleanup()
 {
     int ret = close(sockfd);
@@ -98,9 +129,14 @@ void cleanup()
     {
         syslog(LOG_ERR, "Unlink error with errno : %d", errno);
     }
+    // destroy mutex
+    pthread_mutex_destroy(&mtx);
+    // delete timer
+    timer_delete(timer);
+    // close syslog
     closelog();
 
-    exit(0);
+    exit(RET_SUCCESS);
 }
 
 // Reference : Linux System Programming Chapter 5
@@ -114,10 +150,10 @@ int deamonize()
         return RET_ERROR;
     }
 
-    if( child_pid != 0 )
+    if( child_pid != RET_SUCCESS )
     {
         //parent process
-        exit(0);
+        exit(RET_SUCCESS);
     }
 
     //create new session
@@ -137,7 +173,7 @@ int deamonize()
     dup(0);
     syslog(LOG_DEBUG, "daemon");
 
-    return 0;
+    return RET_SUCCESS;
 }
 
 // thread function
@@ -213,7 +249,7 @@ void *thread_func( void *thread_param )
     lseek(tmp_fd, 0, SEEK_END);
     // lock mutex before writing
     int ret = pthread_mutex_lock(&mtx);
-    if( ret != 0 )
+    if( ret != RET_SUCCESS )
     {
         perror("mutex lock");
     }
@@ -238,18 +274,18 @@ void *thread_func( void *thread_param )
         // bytes_sent is return value from send function
         int bytes_sent = send(thread_data->fd, read_buffer, read_bytes, 0);
 
-        if (bytes_sent == -1) 
+        if (bytes_sent == RET_ERROR) 
         {
             syslog(LOG_ERR, "send");
             break;
         }
     }
     ret = pthread_mutex_unlock(&mtx);
-    if( ret!=0 )
+    if( ret!=RET_SUCCESS )
     {
         perror("mutex unlock");
     }
-    if(read_bytes == -1)
+    if(read_bytes == RET_ERROR)
     {
         perror("read");
         syslog(LOG_ERR, "read");
@@ -261,11 +297,11 @@ void *thread_func( void *thread_param )
     close(thread_data->fd);
     thread_data->fd = -1;
     thread_data->complete_flag = true;
-    printf("Complete from Thread %lu sucessfully\n", (thread_data->tid));
     syslog(LOG_DEBUG, "Closed connection from %s", inet_ntop(AF_INET, &p->sin_addr, address_string, sizeof(address_string)));
     return NULL;
 }
 
+// main function
 int main(int argc, char *argv[])
 {
     bool is_daemon = false;
@@ -299,6 +335,7 @@ int main(int argc, char *argv[])
     // initliaze signal handler
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
+    signal(SIGALRM, signal_handler);
 
     // socket setup
     struct sockaddr_storage their_addr;
@@ -312,7 +349,7 @@ int main(int argc, char *argv[])
 
     int ret; int status = 0;
     ret = getaddrinfo(NULL, SERVER_PORT, &hints, &server_info);
-    if( ret !=0 )
+    if( ret !=RET_SUCCESS )
     {
         syslog(LOG_ERR, "Error : getaddrinfo with error no : %d", errno);
         status = 1;
@@ -323,7 +360,7 @@ int main(int argc, char *argv[])
     }
 
     sockfd = socket(server_info->ai_family, server_info->ai_socktype, server_info->ai_protocol);
-    if( sockfd == -1 )
+    if( sockfd == RET_ERROR )
     {
         syslog(LOG_ERR, "Error : socket with error no : %d", errno);
         status = 1;
@@ -342,7 +379,7 @@ int main(int argc, char *argv[])
     int flags = fcntl(sockfd, F_GETFL);
     fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
     ret = bind(sockfd, server_info->ai_addr, server_info->ai_addrlen);
-    if( ret != 0 )
+    if( ret != RET_SUCCESS )
     {
         syslog(LOG_ERR, "Error : bind with error no : %d", errno);
         status = 1;
@@ -371,7 +408,7 @@ int main(int argc, char *argv[])
     }
 
     ret = listen(sockfd, BACKLOG);
-    if( ret != 0 )
+    if( ret != RET_SUCCESS )
     {
         syslog(LOG_ERR, "Error : listen with error no : %d", errno);
         status = 1;
@@ -399,6 +436,12 @@ int main(int argc, char *argv[])
         syslog(LOG_ERR, "Error opening file with error %d", errno);
     }
 
+    ret = create_timer();
+    if(ret == -1)
+    {
+        perror("timer creation");
+    }
+
     pthread_mutex_init(&mtx, NULL);
 
     node_t *head =NULL;
@@ -406,31 +449,36 @@ int main(int argc, char *argv[])
 
     while(!execution_status)
     {
+        if(timeout)
+        {
+            timeout = false;
+            log_timestamp();
+        }
         int new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &addr_size);
         if( new_fd == -1 )
         {
             if(errno == EWOULDBLOCK)
             {
+                // make accept non blocking
                 continue;
             }
             syslog(LOG_ERR, "Error : accept with error no : %d", errno);
             // accept new connection
             continue;
         }
-        printf("accepted\n");
         node_t *new_node = (node_t *)malloc(sizeof(node_t));
         new_node->data.complete_flag = false;
         new_node->data.fd = new_fd;
         new_node->data.t_addr = their_addr;
         // create a thread for the connection
         int ret = pthread_create( &(new_node->data.tid), NULL, &thread_func, &(new_node->data));
-        if( ret != 0 )
+        if( ret != RET_SUCCESS )
         {
             syslog(LOG_ERR, "pthread_create");
         }
         else
         {
-            printf("Success in creating thread with ID: %lu!\n", (new_node->data.tid));
+            syslog(LOG_DEBUG, "pthread_create");
         }
 
         sll_insert(&head, new_node);
@@ -439,29 +487,91 @@ int main(int argc, char *argv[])
     prev = head;
     while(current)
     {
-        if((current->data.complete_flag == true))
+        if((current->data.complete_flag == true) && (current == head))
         {
+            // when current is the head node
             head = current->next;
             pthread_join(current->data.tid, NULL);
-            printf("Exited from Thread %lu sucessfully\n", (current->data.tid));
+            syslog(LOG_DEBUG, "pthread_join");
             free(current);
             current = head;
         }
-        else if ((current->data.complete_flag == true) && (current != head)) { // Deleting any other node
-            printf("Exited from Thread %lu sucessfully\n", (current->data.tid));
+        else if ((current->data.complete_flag == true) && (current != head)) 
+        { 
+            // when current is not the head node
             prev->next = current->next;
             current->next = NULL;
             pthread_join(current->data.tid, NULL);
+            syslog(LOG_DEBUG, "pthread_join");
             free(current);
             current = prev->next;
         } 
-        else {
-            // Traverse Linked List with previous behind current
+        else 
+        {
+            // traverse the list as current is not complete
             prev = current;
             current = current->next;
         }
     }
-    printf("exit\n");
+    printf("All threads exited!!\n");
     cleanup();
 }
 
+// Function to log timestamp value to file
+void log_timestamp()
+{
+    time_t timestamp;
+    char time_buf[40];
+    char buffer[100];
+
+    struct tm* ts;
+
+    time(&timestamp);
+    ts = localtime(&timestamp);
+
+    // Reference : https://man7.org/linux/man-pages/man3/strftime.3.html for RFC 2822 compliant
+    strftime(time_buf, 40, "%a, %d %b %Y %T %z", ts);
+    sprintf(buffer, "timestamp:%s\n", time_buf);
+
+    lseek(tmp_fd, 0, SEEK_END);
+
+    // atomically write timestamp
+    pthread_mutex_lock(&mtx);
+    int wc = write(tmp_fd, buffer, strlen(buffer));
+    if (wc == RET_ERROR) 
+    {
+        perror("write");
+    }
+    pthread_mutex_unlock(&mtx);
+}
+
+// Function to create a timer
+int create_timer()
+{
+    // CLOCK_REALTIME to access the wall time
+    int ret = timer_create(CLOCK_REALTIME, NULL, &timer);
+    if(ret == -1)
+    {
+        perror("timer_create");
+        return RET_ERROR;
+    }
+
+    // struct itimerval delay;
+    struct itimerspec delay;
+
+    // first timeout after 10 seconds
+    delay.it_value.tv_sec = 10;
+    delay.it_value.tv_nsec = 0;
+    // continuous timeouts every 10 seconds
+    delay.it_interval.tv_sec = 10;
+    delay.it_interval.tv_nsec = 0;
+
+    ret = timer_settime(timer, 0, &delay, NULL);
+    if(ret) 
+    {
+        perror ("timer_settime");
+        return RET_ERROR;
+    }
+
+    return RET_SUCCESS;
+}
