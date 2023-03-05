@@ -196,7 +196,11 @@ void *thread_func( void *thread_param )
     int total_len = 0;
     int old_size = BUFFER_SIZE;
     data_packet = false;
-    char *recieve_buffer;
+    char *recieve_buffer = (char *)malloc(BUFFER_SIZE);
+    if(recieve_buffer == NULL)
+    {
+        syslog(LOG_ERR, "malloc");
+    }
 
     while(!data_packet)
     {
@@ -205,6 +209,7 @@ void *thread_func( void *thread_param )
         if( (byte_recv =  recv(thread_data->fd, &buffer, BUFFER_SIZE, 0)) == -1 )
         {
             syslog(LOG_ERR, "recv");
+            goto recv_error;
         }
         for(int i=0; i< BUFFER_SIZE; i++)
         {
@@ -218,10 +223,10 @@ void *thread_func( void *thread_param )
 
         if(cycle_count == 0)
         {
-            recieve_buffer = (char *)malloc(packet_len);
+            recieve_buffer = (char *)realloc(recieve_buffer, packet_len);
             if(recieve_buffer == NULL)
             {
-                syslog(LOG_ERR, "malloc");
+                syslog(LOG_ERR, "realloc");
             }
             // clearing buffer
             memset(recieve_buffer, '\0', packet_len);
@@ -277,7 +282,7 @@ void *thread_func( void *thread_param )
         if (bytes_sent == RET_ERROR) 
         {
             syslog(LOG_ERR, "send");
-            break;
+            goto send_error;
         }
     }
     ret = pthread_mutex_unlock(&mtx);
@@ -290,10 +295,11 @@ void *thread_func( void *thread_param )
         perror("read");
         syslog(LOG_ERR, "read");
     }
-    free(read_buffer);
+    send_error : free(read_buffer);
 
     // cleanup
-    free(recieve_buffer);
+
+    recv_error : free(recieve_buffer);
     close(thread_data->fd);
     thread_data->fd = -1;
     thread_data->complete_flag = true;
