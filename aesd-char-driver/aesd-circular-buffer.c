@@ -32,6 +32,29 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
     /**
     * TODO: implement per description
     */
+    // check if circular buffer is empty
+    if( (buffer->in_offs == buffer->out_offs) && (buffer->full == false) )
+    {
+        return NULL;
+    }
+    // track remaining bytes
+    int remain_bytes = char_offset+1;
+    // local copy to modify out_offs
+    uint8_t read_offs = buffer->out_offs;
+    // Loop AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED times as it can't go beyond that
+    for(int i=0; i<AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; i++)
+    {
+        // success case, we find size > remaining bytes
+        if(buffer->entry[read_offs].size >= remain_bytes)
+        {
+            *entry_offset_byte_rtn = remain_bytes - 1;
+            return (&buffer->entry[read_offs]);
+        }
+        // iterate 
+        remain_bytes -= buffer->entry[read_offs].size;
+        read_offs = MOVE_BUFFPTR(read_offs); 
+    }
+    // we don't find the requested offset
     return NULL;
 }
 
@@ -47,6 +70,26 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const s
     /**
     * TODO: implement per description
     */
+    // check if full then advance both in and out
+    if( buffer->full )
+    {
+        buffer->entry[buffer->in_offs].buffptr = add_entry->buffptr;
+        buffer->entry[buffer->in_offs].size = add_entry->size;
+        buffer->in_offs = MOVE_BUFFPTR(buffer->in_offs);
+        buffer->out_offs = MOVE_BUFFPTR(buffer->out_offs);
+    }
+    else
+    {
+        buffer->entry[buffer->in_offs].buffptr = add_entry->buffptr;
+        buffer->entry[buffer->in_offs].size = add_entry->size;
+        buffer->in_offs = MOVE_BUFFPTR(buffer->in_offs);
+        // check if buffer became full
+        if( buffer->in_offs == buffer->out_offs )
+        {
+            buffer->full = true;
+        }
+    }
+    return;
 }
 
 /**
