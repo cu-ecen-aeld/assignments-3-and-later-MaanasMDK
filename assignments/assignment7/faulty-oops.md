@@ -1,5 +1,5 @@
 ## Output
-''' 
+``` 
 echo “hello_world” > /dev/faulty
 Unable to handle kernel NULL pointer dereference at virtual address 0000000000000000
 Mem abort info:
@@ -43,7 +43,7 @@ Call trace:
  el0t_64_sync+0x1a0/0x1a4
 Code: d2800001 d2800000 d503233f d50323bf (b900003f) 
 ---[ end trace 55e3e43446aa7bb3 ]---
-'''
+```
 
 ## Analysis
 
