@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # Author: Maanas Makam Dileep Kumar
 # Description: Shell script to perform finder function.

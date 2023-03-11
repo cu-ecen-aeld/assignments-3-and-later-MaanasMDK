@@ -1,4 +1,10 @@
 #include "systemcalls.h"
+#include <errno.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 /**
  * @param cmd the command to execute with system()
@@ -16,7 +22,13 @@ bool do_system(const char *cmd)
  *   and return a boolean true if the system() call completed with success
  *   or false() if it returned a failure
 */
+    int ret = system(cmd);
 
+    if( ret == -1 )
+    {
+        printf( "Error : System() call returned with error %d!!\n\r", errno );
+        return false;
+    }
     return true;
 }
 
@@ -58,6 +70,54 @@ bool do_exec(int count, ...)
  *   as second argument to the execv() command.
  *
 */
+    pid_t child_pid = fork();
+    
+    // check for fork error
+    if( child_pid == -1)
+    {
+        printf( "Fork error returned with error status %d!!\n\r", errno );
+        perror("fork");
+        return false;
+    }
+
+    if( child_pid == 0 )
+    {
+        execv( command[0], command );
+        printf( "Exec error returned with error status %d!!\n\r", errno );
+        perror("execv");
+        exit(1);
+ 
+    }
+
+    int status;
+    pid_t wait_ret = waitpid( child_pid, &status, 0 );
+
+    if( wait_ret == -1 )
+    {
+        printf( "wait error returned with error status %d!!\n\r", errno );
+        perror("wait");
+        return false; 
+    }
+    else
+    {
+        // check if child process exited
+        if( WIFEXITED(status))
+        {
+            // check for exit status 0 for success
+            if( WEXITSTATUS(status) == 0)
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
+        else
+        {
+            return false;
+        }
+    }
 
     va_end(args);
 
@@ -92,6 +152,68 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
+    pid_t child_pid;
+
+    int fd = open( outputfile, O_WRONLY | O_TRUNC | O_CREAT, 0644 );
+
+    if( fd == -1 )
+    {
+        perror("open_file");
+        return false;
+    }
+
+    child_pid = fork();
+
+    if( child_pid == -1 )
+    {
+        perror("fork");
+        return false;
+    }
+    
+    if( child_pid == 0 )
+    {
+        if (dup2(fd, 1) < 0) 
+        { 
+            perror("dup2");
+            close(fd);
+            return false;
+        }
+        close(fd);
+        execv(command[0], command); 
+        perror("execv");
+        exit(1);
+    }
+    
+    int status;
+    pid_t wait_ret = waitpid( child_pid, &status, 0 );
+
+    if( wait_ret == -1 )
+    {
+        perror("wait");
+        return false; 
+    }
+    else
+    {
+        // check if child process exited
+        if( WIFEXITED(status))
+        {
+            // check for exit status 0 for success
+            if( WEXITSTATUS(status) == 0)
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
+        else
+        {
+            return false;
+        }
+    }
+
+
 
     va_end(args);
 
