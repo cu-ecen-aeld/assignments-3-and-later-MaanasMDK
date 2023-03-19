@@ -174,7 +174,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
             retval = -ENOMEM;
             goto free_and_end;
         }
-        memcpy(dev->buff_ptr, tmp_buf, extra);
+        memcpy(dev->buff_ptr + dev->buff_size, tmp_buf, extra);
         dev->buff_size += extra;
     }
 
