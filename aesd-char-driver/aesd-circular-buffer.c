@@ -32,17 +32,20 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
     /**
     * TODO: implement per description
     */
+    int remain_bytes;
+    uint8_t read_offs;
+    int i;
     // check if circular buffer is empty
     if( (buffer->in_offs == buffer->out_offs) && (buffer->full == false) )
     {
         return NULL;
     }
     // track remaining bytes
-    int remain_bytes = char_offset+1;
+    remain_bytes = char_offset+1;
     // local copy to modify out_offs
-    uint8_t read_offs = buffer->out_offs;
+    read_offs = buffer->out_offs;
     // Loop AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED times as it can't go beyond that
-    for(int i=0; i<AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; i++)
+    for(i=0; i<AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; i++)
     {
         // success case, we find size > remaining bytes
         if(buffer->entry[read_offs].size >= remain_bytes)
@@ -65,14 +68,16 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
 * Any necessary locking must be handled by the caller
 * Any memory referenced in @param add_entry must be allocated by and/or must have a lifetime managed by the caller.
 */
-void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
+char *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
 {
     /**
     * TODO: implement per description
     */
     // check if full then advance both in and out
+    char *ret = NULL;
     if( buffer->full )
     {
+        ret = (char *)buffer->entry[buffer->in_offs].buffptr;
         buffer->entry[buffer->in_offs].buffptr = add_entry->buffptr;
         buffer->entry[buffer->in_offs].size = add_entry->size;
         buffer->in_offs = MOVE_BUFFPTR(buffer->in_offs);
@@ -89,7 +94,7 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const s
             buffer->full = true;
         }
     }
-    return;
+    return ret;
 }
 
 /**

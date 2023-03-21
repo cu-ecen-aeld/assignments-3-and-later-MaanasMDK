@@ -30,6 +30,7 @@
 #define SERVER_PORT ("9000")
 #define BACKLOG (10)
 #define BUFFER_SIZE (3)
+#define USE_AESD_CHAR_DEVICE 
 
 /************************************
 * Global Variables
@@ -41,14 +42,17 @@ int tmp_fd;
 // varibale to track file size
 int file_size;
 // mutex to for writing to the common file
+#ifndef USE_AESD_CHAR_DEVICE
 pthread_mutex_t mtx;
+#endif
 // execution status tracking
 int execution_status = 0;
+#ifndef USE_AESD_CHAR_DEVICE
 // flag to track timeout
 bool timeout = false;
 // timer object
 timer_t timer;
-
+#endif
 /**********************************
 * Linked list data structures
 **********************************/
@@ -71,10 +75,12 @@ typedef struct node
 /**********************************
 * Function Definitions
 **********************************/
+#ifndef USE_AESD_CHAR_DEVICE
 // function to print timestamp
 void log_timestamp();
 // function to create timer
 int create_timer();
+#endif
 // function to insert an element into head of the singly linked list
 int sll_insert( node_t **head, node_t *new_node)
 {
@@ -101,12 +107,14 @@ void signal_handler(int signum)
         syslog(LOG_DEBUG, "Caught signal SIGTERM, exiting!!");
         execution_status = 1;
     }
+    #ifndef USE_AESD_CHAR_DEVICE
     else if(signum == SIGALRM)
     {
         syslog(LOG_DEBUG, "Caught signal SIGALRM!!");
         // set timeout flag
         timeout = true;
     }
+    #endif
 }
 
 // Cleanup function
@@ -123,7 +131,7 @@ void cleanup()
     {
         syslog(LOG_ERR, "Close storage file error with errno : %d", errno);
     }
-
+    #ifndef USE_AESD_CHAR_DEVICE
     ret = unlink("/var/tmp/aesdsocketdata");
     if(ret == -1)
     {
@@ -131,8 +139,11 @@ void cleanup()
     }
     // destroy mutex
     pthread_mutex_destroy(&mtx);
+    #endif
     // delete timer
+    #ifndef USE_AESD_CHAR_DEVICE
     timer_delete(timer);
+    #endif
     // close syslog
     closelog();
 
@@ -253,12 +264,26 @@ void *thread_func( void *thread_param )
     // move to end of file
     lseek(tmp_fd, 0, SEEK_END);
     // lock mutex before writing
+    #ifndef USE_AESD_CHAR_DEVICE
     int ret = pthread_mutex_lock(&mtx);
     if( ret != RET_SUCCESS )
     {
         perror("mutex lock");
     }
-    int wc = write(tmp_fd, recieve_buffer, total_len);
+    #endif
+    #ifdef USE_AESD_CHAR_DEVICE
+    char *filename = "/dev/aesdchar";
+    #else
+    char *filename = "/var/tmp/aesdsocketdata";
+    #endif
+	// opening an existing file in write mode or creating a file with permission modes of user=rw ,group=rw ,others=rw
+	int new_tmp_fd = open( filename, O_RDWR | O_CREAT | O_APPEND, S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH | S_IWOTH );
+
+    if( new_tmp_fd == -1 )
+    {
+        syslog(LOG_ERR, "Error opening file with error %d", errno);
+    }
+    int wc = write(new_tmp_fd, recieve_buffer, total_len);
     if( wc == -1)
     {
         syslog(LOG_ERR, "write");
@@ -266,7 +291,9 @@ void *thread_func( void *thread_param )
     file_size += wc;
     // resend data to client
     memset(buffer, '\0', BUFFER_SIZE);
-    lseek(tmp_fd, 0, SEEK_SET);
+    #ifndef USE_AESD_CHAR_DEVICE
+    lseek(new_tmp_fd, 0, SEEK_SET);
+    #endif
     int read_bytes;
 
     char *read_buffer = (char *)malloc(BUFFER_SIZE);
@@ -274,7 +301,7 @@ void *thread_func( void *thread_param )
     if (read_buffer == NULL) {
         printf("Unable to allocate memory to read_buffer\n");
     }
-    while( (read_bytes = read(tmp_fd, read_buffer, BUFFER_SIZE))>0)
+    while( (read_bytes = read(new_tmp_fd, read_buffer, BUFFER_SIZE))>0)
     {
         // bytes_sent is return value from send function
         int bytes_sent = send(thread_data->fd, read_buffer, read_bytes, 0);
@@ -285,11 +312,14 @@ void *thread_func( void *thread_param )
             goto send_error;
         }
     }
+    close(new_tmp_fd);
+    #ifndef USE_AESD_CHAR_DEVICE
     ret = pthread_mutex_unlock(&mtx);
     if( ret!=RET_SUCCESS )
     {
         perror("mutex unlock");
     }
+    #endif
     if(read_bytes == RET_ERROR)
     {
         perror("read");
@@ -434,32 +464,30 @@ int main(int argc, char *argv[])
         return RET_ERROR;
     }
 
-	// opening an existing file in write mode or creating a file with permission modes of user=rw ,group=rw ,others=rw
-	tmp_fd = open( "/var/tmp/aesdsocketdata", O_RDWR | O_CREAT | O_APPEND, S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH | S_IWOTH );
-
-    if( tmp_fd == -1 )
-    {
-        syslog(LOG_ERR, "Error opening file with error %d", errno);
-    }
-
+    #ifndef USE_AESD_CHAR_DEVICE
     ret = create_timer();
     if(ret == -1)
     {
         perror("timer creation");
     }
+    #endif
 
+    #ifndef USE_AESD_CHAR_DEVICE
     pthread_mutex_init(&mtx, NULL);
+    #endif
 
     node_t *head =NULL;
     node_t *prev,*current;
 
     while(!execution_status)
     {
+        #ifndef USE_AESD_CHAR_DEVICE
         if(timeout)
         {
             timeout = false;
             log_timestamp();
         }
+        #endif
         int new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &addr_size);
         if( new_fd == -1 )
         {
@@ -523,6 +551,7 @@ int main(int argc, char *argv[])
     cleanup();
 }
 
+#ifndef USE_AESD_CHAR_DEVICE
 // Function to log timestamp value to file
 void log_timestamp()
 {
@@ -542,13 +571,17 @@ void log_timestamp()
     lseek(tmp_fd, 0, SEEK_END);
 
     // atomically write timestamp
+    #ifndef USE_AESD_CHAR_DEVICE
     pthread_mutex_lock(&mtx);
+    #endif
     int wc = write(tmp_fd, buffer, strlen(buffer));
     if (wc == RET_ERROR) 
     {
         perror("write");
     }
+    #ifndef USE_AESD_CHAR_DEVICE
     pthread_mutex_unlock(&mtx);
+    #endif
 }
 
 // Function to create a timer
@@ -581,3 +614,4 @@ int create_timer()
 
     return RET_SUCCESS;
 }
+#endif
