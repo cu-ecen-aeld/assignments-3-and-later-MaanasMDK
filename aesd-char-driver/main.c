@@ -10,7 +10,6 @@
  * @copyright Copyright (c) 2019
  *
  */
-
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/printk.h>
@@ -20,6 +19,8 @@
 #include "aesdchar.h"
 #include "linux/slab.h"
 #include "linux/string.h"
+#include "aesd_ioctl.h"
+
 int aesd_major =   0; // use dynamic major
 int aesd_minor =   0;
 
@@ -47,6 +48,102 @@ int aesd_release(struct inode *inode, struct file *filp)
      * TODO: handle release
      */
     return 0;
+}
+
+//custom llseek function using fixed_size_llseek (Option 2)
+loff_t aesd_llseek( struct file *filp, loff_t offset, int whence )
+{
+    loff_t ret_offset;
+    struct aesd_dev *dev;
+    dev = filp->private_data;
+
+    // locking for the llseek
+    if (mutex_lock_interruptible(&aesd_device.lock)) {
+        ret_offset = -ERESTARTSYS;
+        goto end;
+    }
+
+    ret_offset = fixed_size_llseek(filp, offset, whence, dev->buffer.total_buff_size);
+
+    mutex_unlock(&aesd_device.lock);
+
+    end : return ret_offset;
+}
+
+// function to convert write_cmd and write_cmd_offset into a raw byte offset.
+static long aesd_adjust_file_offset(struct file *filp, unsigned int write_cmd, unsigned int write_cmd_offset)
+{
+    long ret_val = 0;
+    int i;
+    long pos = 0;
+    struct aesd_dev *dev = filp->private_data;
+
+    // check for valid write_cmd
+    if(write_cmd >= AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED)
+    {
+        ret_val = -EINVAL;
+        goto end;
+    }
+
+    // check for valid write_cmd_offset
+    if(write_cmd_offset > dev->buffer.entry[write_cmd].size)
+    {
+        ret_val = -EINVAL;
+        goto end;
+    }
+
+    if(mutex_lock_interruptible(&aesd_device.lock))
+    {
+        ret_val = -ERESTARTSYS;
+        goto end;
+    }
+
+    // iterate over circular buffer enteries
+    for(i=0; i< write_cmd; i++)
+    {
+        if(dev->buffer.entry[i].size == 0)
+        {
+            ret_val = -EINVAL;
+            goto cleanup;
+        }
+        pos += dev->buffer.entry[i].size;
+    }
+    pos += write_cmd_offset;
+    filp->f_pos = pos;
+    cleanup : mutex_unlock(&aesd_device.lock);
+    end : return ret_val;
+}
+
+// Reference : ioctl.pptx from Coursera referring to scull_ioctl() function.
+long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    long ret_val;
+    struct aesd_seekto seek_buffer;
+
+    // Reference : Device Drivers Chapter 6 
+    if(_IOC_TYPE(cmd) != AESD_IOC_MAGIC)
+        return -ENOTTY;
+    if(_IOC_NR(cmd) > AESDCHAR_IOC_MAXNR)
+        return -ENOTTY;
+    
+    switch(cmd)
+    {
+        case AESDCHAR_IOCSEEKTO:
+            if(copy_from_user(&seek_buffer,(const void __user *)arg, sizeof(seek_buffer)) != 0)
+            {
+                ret_val = -EFAULT;
+            }
+            else
+            {
+                ret_val = aesd_adjust_file_offset(filp, seek_buffer.write_cmd, seek_buffer.write_cmd_offset);
+            }
+            break;
+        default : 
+            ret_val = -ENOTTY;
+            break;
+    }
+
+    return ret_val;
 }
 
 ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
@@ -201,6 +298,8 @@ struct file_operations aesd_fops = {
     .write =    aesd_write,
     .open =     aesd_open,
     .release =  aesd_release,
+    .llseek =  aesd_llseek,
+    .unlocked_ioctl = aesd_ioctl,
 };
 
 static int aesd_setup_cdev(struct aesd_dev *dev)

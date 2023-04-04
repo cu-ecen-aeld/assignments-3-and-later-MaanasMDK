@@ -78,8 +78,12 @@ char *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const 
     if( buffer->full )
     {
         ret = (char *)buffer->entry[buffer->in_offs].buffptr;
+        // reduce size of buffer element overwritten
+        buffer->total_buff_size -= buffer->entry[buffer->in_offs].size;
         buffer->entry[buffer->in_offs].buffptr = add_entry->buffptr;
         buffer->entry[buffer->in_offs].size = add_entry->size;
+        // add size of new buffer element
+        buffer->total_buff_size += add_entry->size;
         buffer->in_offs = MOVE_BUFFPTR(buffer->in_offs);
         buffer->out_offs = MOVE_BUFFPTR(buffer->out_offs);
     }
@@ -87,6 +91,8 @@ char *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const 
     {
         buffer->entry[buffer->in_offs].buffptr = add_entry->buffptr;
         buffer->entry[buffer->in_offs].size = add_entry->size;
+        // add size of new buffer element
+        buffer->total_buff_size += add_entry->size;
         buffer->in_offs = MOVE_BUFFPTR(buffer->in_offs);
         // check if buffer became full
         if( buffer->in_offs == buffer->out_offs )
