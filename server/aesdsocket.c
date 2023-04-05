@@ -21,6 +21,7 @@
 #include <netdb.h>
 #include <pthread.h>
 #include <time.h>
+#include "../aesd-char-driver/aesd_ioctl.h"
 
 /************************************
 * Defines
@@ -53,6 +54,9 @@ bool timeout = false;
 // timer object
 timer_t timer;
 #endif
+// string format for IOCTL
+const char* ioctl_string = "AESDCHAR_IOCSEEKTO:";
+
 /**********************************
 * Linked list data structures
 **********************************/
@@ -278,17 +282,36 @@ void *thread_func( void *thread_param )
     #endif
 	// opening an existing file in write mode or creating a file with permission modes of user=rw ,group=rw ,others=rw
 	int new_tmp_fd = open( filename, O_RDWR | O_CREAT | O_APPEND, S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH | S_IWOTH );
-
     if( new_tmp_fd == -1 )
     {
         syslog(LOG_ERR, "Error opening file with error %d", errno);
     }
-    int wc = write(new_tmp_fd, recieve_buffer, total_len);
-    if( wc == -1)
+    // check for IOCTL string
+    if(strncmp(recieve_buffer, ioctl_string, strlen(ioctl_string)) == 0)
     {
-        syslog(LOG_ERR, "write");
+        struct aesd_seekto seek_buffer;
+        // Reference : https://stackoverflow.com/questions/62973978/extract-multiple-integers-from-a-string-in-c
+        int count = sscanf(recieve_buffer, "AESDCHAR_IOCSEEKTO:%d,%d", &seek_buffer.write_cmd, &seek_buffer.write_cmd_offset);
+        if(count != 2)
+        {
+            syslog(LOG_ERR, "Error sscanf with error no: %d", errno);
+        }
+        syslog(LOG_DEBUG, "IOCTL offset %d , %d", seek_buffer.write_cmd, seek_buffer.write_cmd_offset);
+
+        if( ioctl(new_tmp_fd, AESDCHAR_IOCSEEKTO, &seek_buffer))
+        {
+            syslog(LOG_ERR, "Error ioctl with error no: %d", errno);
+        }
     }
-    file_size += wc;
+    else
+    {
+        int wc = write(new_tmp_fd, recieve_buffer, total_len);
+        if( wc == -1)
+        {
+            syslog(LOG_ERR, "write");
+        }
+        file_size += wc;
+    }
     // resend data to client
     memset(buffer, '\0', BUFFER_SIZE);
     #ifndef USE_AESD_CHAR_DEVICE
@@ -571,17 +594,14 @@ void log_timestamp()
     lseek(tmp_fd, 0, SEEK_END);
 
     // atomically write timestamp
-    #ifndef USE_AESD_CHAR_DEVICE
     pthread_mutex_lock(&mtx);
-    #endif
     int wc = write(tmp_fd, buffer, strlen(buffer));
     if (wc == RET_ERROR) 
     {
         perror("write");
     }
-    #ifndef USE_AESD_CHAR_DEVICE
     pthread_mutex_unlock(&mtx);
-    #endif
+
 }
 
 // Function to create a timer
